@@ -2,7 +2,7 @@
 
 目标：把 mpv 调成“QuickTime 式逐帧播放器”，和 Fast Viewer 一样快、按键一致，换电脑直接用。
 仓库：https://github.com/dx3081/mpv-config　　装在：`C:\app\mpv\portable_config`
-更新：2026-10-28（温哥华时间）
+更新：2026-10-28 23:50（温哥华时间）。今晚收口时的版本：GitHub 提交 4e06531，已装在台式机。
 
 ## 这一版做了什么
 - 旧配置整份备份在 `C:\app\mpv\portable_config.bak-2026-10-28`（还有一份一模一样的 `portable_config.bak-2026-10-28-2233`，是安装脚本第二次跑时自动备的，可删）。
