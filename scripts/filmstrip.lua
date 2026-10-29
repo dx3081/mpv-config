@@ -52,6 +52,9 @@ local need_redraw = false
 local press_timer = nil
 local press_x = 0
 local fine = nil                -- 放大镜模式：{ t0=, span= }
+local speed_drag = nil          -- 正在拖速度条：{ x0=, speed0=, moved= }
+local hovering_speed = false
+local wheel_on = false
 
 -- 缩略图：两套，overview = 整段，fine = 放大镜那几秒
 -- 每套：{ dir=, n=, thumbs={ {file=, ready=} }, t0=, span=, token=, poll=, id= }
@@ -144,8 +147,21 @@ local function layout()
         play = { cx = pad + btn / 2, cy = cy, r = btn / 2 },
         mute = { cx = W - pad - btn / 2, cy = cy, r = btn / 2 },
         strip = { x0 = x0, x1 = x1, y0 = y0, y1 = y1, w = x1 - x0, h = sh },
+        -- 速度拖动条（和 uosc 那个一样的手感）：条右上角；放大镜模式时让位给秒刻度
+        speed = { x0 = x1 - 110 * s, x1 = x1, y0 = top + 8 * s, y1 = top + 42 * s, shown = not fine },
     }
     return L
+end
+
+local function in_speed(x, y)
+    if not L or not L.speed.shown then return false end
+    local sp = L.speed
+    return x >= sp.x0 and x <= sp.x1 and y >= sp.y0 and y <= sp.y1
+end
+
+local function fmt_speed(v)
+    local str = string.format("%.2f", v):gsub("0+$", ""):gsub("%.$", "")
+    return str .. "x"
 end
 
 local function in_bar(x, y) return L and y >= L.top and y <= H and x >= 0 and x <= W end
@@ -158,7 +174,8 @@ local function in_circle(c, x, y) return (x - c.cx) ^ 2 + (y - c.cy) ^ 2 <= (c.r
 
 local function x_to_time(x)
     local t0, span = window()
-    return t0 + clamp((x - L.strip.x0) / L.strip.w, 0, 1) * span
+    local t = t0 + clamp((x - L.strip.x0) / L.strip.w, 0, 1) * span
+    return clamp(t, 0, duration())
 end
 local function time_to_x(t)
     local t0, span = window()
@@ -193,17 +210,20 @@ local function place_thumbs()
     local n_slots = math.max(1, math.ceil(st.w / natural_w))
     if n_slots > opts.thumbs then n_slots = opts.thumbs end
     local y = math.floor(st.y0 + 0.5)
+    local win_t0, win_span = window()
     for j = 1, n_slots do
         local x = math.floor(st.x0 + (j - 1) * st.w / n_slots + 0.5)
         local x_next = math.floor(st.x0 + j * st.w / n_slots + 0.5)
         local dw = x_next - x + (j < n_slots and 1 or 0)   -- 相邻格子重叠 1 像素，免得缩放边缘露出细缝
         local t = nil
         local idx = 0
-        if set and set.n > 0 then
-            -- 这一格对应的时间 → 第几张小图（小图在这套的时间窗口里均匀分布）
-            local frac = (j - 0.5) / n_slots
-            idx = clamp(math.floor(frac * set.n) + 1, 1, set.n)
-            t = set.thumbs[idx]
+        if set and set.n > 0 and set.span > 0 then
+            -- 这一格对应的时间 → 第几张小图（小图在这套抽帧的时间范围里均匀分布；范围外的格子空着）
+            local tc = win_t0 + (j - 0.5) / n_slots * win_span
+            if tc >= set.t0 and tc <= set.t0 + set.span then
+                idx = clamp(math.floor((tc - set.t0) / set.span * set.n) + 1, 1, set.n)
+                t = set.thumbs[idx]
+            end
         end
         if t and t.ready and dw > 0 then
             local src_w = math.min(thumb_w, math.floor(dw * thumb_h / dh + 0.5))
@@ -337,20 +357,52 @@ local function draw()
         end)
     end
 
-    -- 放大镜模式：条上方画秒刻度（每秒一道，每 2 秒标时间）
+    -- 放大镜模式：条上方画秒刻度（每秒一道，每 2 秒标时间）；超出视频范围的部分涂黑
     if fine then
         local t0, span = window()
+        if t0 < 0 then
+            shape(ass, col("000000"), function(a) a:rect_cw(st.x0, st.y0, time_to_x(0), st.y1) end)
+        end
+        if t0 + span > dur then
+            shape(ass, col("000000"), function(a) a:rect_cw(time_to_x(dur), st.y0, st.x1, st.y1) end)
+        end
         local tick_y = st.y0 - 4 * s
-        local first = math.ceil(t0)
+        local first = math.max(0, math.ceil(t0))
+        local last = math.min(math.floor(dur), math.floor(t0 + span))
         shape(ass, col("9a9a9a"), function(a)
-            for t = first, math.floor(t0 + span) do
+            for t = first, last do
                 local x = time_to_x(t)
                 a:rect_cw(x - 0.5 * s, tick_y - 5 * s, x + 0.5 * s, tick_y)
             end
         end)
-        for t = first, math.floor(t0 + span) do
+        for t = first, last do
             if t % 2 == 0 then text(ass, time_to_x(t), tick_y - 6 * s, 2, 10, "9A9A9A", s, fmt_time(t, true)) end
         end
+    end
+
+    -- 速度拖动条：上面写倍速，下面一排刻度随速度滚动，中间一根白色指针
+    local sp = L.speed
+    if sp.shown then
+        local speed = mp.get_property_native("speed") or 1
+        local cx = (sp.x0 + sp.x1) / 2
+        local active = hovering_speed or speed_drag
+        text(ass, cx, sp.y0 + 16 * s, 2, 14, active and "FFFFFF" or "DADADA", s, fmt_speed(speed))
+        local notch = 10 * s
+        local ty0, ty1 = sp.y0 + 22 * s, sp.y0 + 32 * s
+        local shift = -((speed * 10) % 1) * notch
+        shape(ass, col(active and "BBBBBB" or "7A7A7A"), function(a)
+            local k = -6
+            while k <= 6 do
+                local x = cx + k * notch + shift
+                if x >= sp.x0 + 2 * s and x <= sp.x1 - 2 * s then
+                    a:rect_cw(x - 0.5 * s, ty0 + 2 * s, x + 0.5 * s, ty1 - 2 * s)
+                end
+                k = k + 1
+            end
+        end)
+        shape(ass, col("FFFFFF"), function(a)
+            a:move_to(cx - 3 * s, ty1 + 1 * s); a:line_to(cx + 3 * s, ty1 + 1 * s); a:line_to(cx, ty0 - 1 * s)
+        end)
     end
 
     -- 拖条（位图 overlay，压在小图之上）
@@ -358,21 +410,23 @@ local function draw()
     local hy0, hy1 = st.y0 - 5 * s, st.y1 + 5 * s
     place_playhead(hx, hy0, hy1 - hy0)
 
-    -- 时间：拖动/暂停时在拖条上方显示当前时间（放大镜模式加帧号）；悬停时在鼠标处显示指到的时间
+    -- 时间：拖动/暂停时在拖条上方显示“当前 / 总长”（放大镜模式改成加帧号）；悬停时在鼠标处显示指到的时间
     local label_y = fine and (st.y0 - 20 * s) or (hy0 - 4 * s)
     if dragging or paused then
-        local str = fmt_time(pos)
+        local str
         if fine then
+            str = fmt_time(pos)
             local fr = mp.get_property_native("estimated-frame-number")
             if fr then str = str .. "  ·  第 " .. fr .. " 帧" end
+        else
+            str = fmt_time(pos) .. "  /  " .. fmt_time(dur)
         end
-        text(ass, hx, label_y, 2, 14, "FFFFFF", s, str)
+        local lx = hx
+        if sp.shown then lx = math.min(lx, sp.x0 - 60 * s) end   -- 别压到速度条
+        text(ass, math.max(lx, st.x0 + 60 * s), label_y, 2, 14, "FFFFFF", s, str)
     end
     if hovering_strip and not dragging and mouse.x then
         text(ass, clamp(mouse.x, st.x0, st.x1), st.y1 + 16 * s, 2, 12, "C8C8C8", s, fmt_time(x_to_time(mouse.x)))
-    end
-    if (dragging or paused or hovering_strip) and not fine then
-        text(ass, st.x1, st.y0 - 4 * s, 9, 11, "9A9A9A", s, fmt_time(dur))
     end
 
     ov.res_x, ov.res_y = W, H
@@ -535,16 +589,21 @@ local function enter_fine()
     local span = L.strip.w / (opts.fine_px_per_frame * L.s * fps)
     span = clamp(span, 2, opts.fine_span)
     span = math.min(span, dur)
-    -- 鼠标现在在条的哪个比例，那个点就是当前时间（这样进放大镜那一刻画面不跳）
+    -- 鼠标现在在条的哪个比例，那个点就是当前时间（这样进放大镜那一刻画面不跳）。
+    -- 窗口可以超出视频开头/结尾（超出部分空着），不然在片头片尾按住会对不上、拖不动。
     local frac = clamp((mouse.x - L.strip.x0) / L.strip.w, 0, 1)
-    local t0 = clamp(pos - frac * span, 0, math.max(0, dur - span))
+    local t0 = pos - frac * span
     fine = { t0 = t0, span = span }
     invalidate_placement()
     layout()
-    -- 放大镜这几秒的小图：精确到帧抽，张数按格子数
+    -- 放大镜这几秒的小图：只抽落在视频范围内的那段，精确到帧，张数按格子数折算
     local st = L.strip
-    local n = clamp(math.ceil(st.w / (st.h * thumb_w / thumb_h)), 4, opts.thumbs)
-    if thumb_w > 0 then gen_set("fine", t0, span, n, true) end
+    local n_slots = clamp(math.ceil(st.w / (st.h * thumb_w / thumb_h)), 4, opts.thumbs)
+    local g0, g1 = math.max(t0, 0), math.min(t0 + span, dur)
+    if thumb_w > 0 and g1 > g0 then
+        local n = clamp(math.ceil(n_slots * (g1 - g0) / span), 1, opts.thumbs)
+        gen_set("fine", g0, g1 - g0, n, true)
+    end
     request_redraw()
 end
 
@@ -575,10 +634,24 @@ local function cancel_press_timer()
     if press_timer then press_timer:kill(); press_timer = nil end
 end
 
+local function enable_wheel(on)
+    if on == wheel_on then return end
+    wheel_on = on
+    if on then mp.enable_key_bindings("filmstrip_wheel") else mp.disable_key_bindings("filmstrip_wheel") end
+end
+
+local function set_speed(v)
+    v = clamp(math.floor(v * 100 + 0.5) / 100, 0.1, 5)
+    mp.set_property_number("speed", v)
+end
+
 local function on_mouse_down()
     if not L then return end
     local x, y = mouse.x, mouse.y
-    if in_strip(x, y) then
+    if in_speed(x, y) then
+        speed_drag = { x0 = x, speed0 = mp.get_property_native("speed") or 1, moved = false }
+        request_redraw()
+    elseif in_strip(x, y) then
         dragging = true
         was_playing = not mp.get_property_native("pause")
         if was_playing then mp.set_property_native("pause", true) end
@@ -599,6 +672,13 @@ end
 
 local function on_mouse_up()
     cancel_press_timer()
+    if speed_drag then
+        if not speed_drag.moved then set_speed(1) end     -- 点一下回到 1 倍
+        speed_drag = nil
+        if not in_bar(mouse.x, mouse.y) then enable_bindings(false) end
+        request_redraw()
+        return
+    end
     if dragging then
         dragging = false
         exit_fine()
@@ -615,6 +695,15 @@ local function on_mouse_pos(_, mpos)
     mouse = mpos
     if not L then layout() end
     local over_bar = mpos.hover and in_bar(mpos.x, mpos.y)
+    if speed_drag then
+        local dx = mpos.x - speed_drag.x0
+        if math.abs(dx) > 3 * L.s then speed_drag.moved = true end
+        if speed_drag.moved then
+            local steps = math.floor(dx / (10 * L.s) + 0.5)
+            set_speed(speed_drag.speed0 + steps * 0.1)
+        end
+        return
+    end
     if dragging then
         if not fine and press_timer and math.abs(mpos.x - press_x) >= 6 * L.s then cancel_press_timer() end
         seek_to_x(mpos.x)
@@ -626,6 +715,12 @@ local function on_mouse_pos(_, mpos)
         hovering_strip = hs
         invalidate_placement()
     end
+    local hsp = over_bar and in_speed(mpos.x, mpos.y)
+    if hsp ~= hovering_speed then
+        hovering_speed = hsp
+        request_redraw()
+    end
+    enable_wheel(hsp)
     if hs then request_redraw() end
 end
 
@@ -633,6 +728,11 @@ mp.set_key_bindings({
     { "mbtn_left", function() on_mouse_up() end, function() on_mouse_down() end },
     { "mbtn_left_dbl", function() end },
 }, "filmstrip_mouse", "force")
+-- 鼠标停在速度条上时滚轮改速度（别处滚轮还是逐帧）
+mp.set_key_bindings({
+    { "wheel_up", function() set_speed((mp.get_property_native("speed") or 1) + 0.1) end },
+    { "wheel_down", function() set_speed((mp.get_property_native("speed") or 1) - 0.1) end },
+}, "filmstrip_wheel", "force")
 
 ----------------------------------------------------------------------
 -- 开关 A / B
@@ -669,7 +769,8 @@ local function set_enabled(on)
         remove_overlays()
         remove_playhead()
         enable_bindings(false)
-        hovering_strip, dragging = false, false
+        enable_wheel(false)
+        hovering_strip, dragging, hovering_speed, speed_drag = false, false, false, nil
         draw()
     end
 end
@@ -696,6 +797,7 @@ mp.observe_property("mouse-pos", "native", on_mouse_pos)
 mp.observe_property("time-pos", "number", function() request_redraw() end)
 mp.observe_property("pause", "native", function() request_redraw() end)
 mp.observe_property("mute", "native", function() request_redraw() end)
+mp.observe_property("speed", "native", function() request_redraw() end)
 mp.observe_property("duration", "native", function() maybe_start_overview(); request_redraw() end)
 mp.observe_property("video-params", "native", function() maybe_start_overview() end)
 mp.observe_property("fullscreen", "native", function() L = nil; invalidate_placement(); request_redraw() end)
