@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   把这个仓库的 mpv 配置装到某个 mpv 的 portable_config 里。
 
