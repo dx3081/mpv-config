@@ -4,13 +4,13 @@
 --   2. 刚打开文件时（窗口模式、非最大化），把窗口加高那一条，画面不缩、不出黑边；
 --      屏幕放不下就改成按比例收窄窗口。全屏只做第 1 件。
 -- 选项在 script-opts/bottom-bar.conf：
---   height=88            留几像素（uosc 默认：timeline 40 + controls 32 + 间距 16）
+--   height=110           留几像素（uosc 的 timeline 40 + controls 32 + 间距；胶片条模式要放时间标签）
 --   scale=1              窗口模式倍率，要和 uosc.conf 的 scale 一样
 --   scale_fullscreen=1.3 全屏倍率，要和 uosc.conf 的 scale_fullscreen 一样
 --   grow_window=yes      打开文件时自动加高窗口；no 则只让画面缩进去
 
 local options = {
-    height = 88,
+    height = 110,
     scale = 1,
     scale_fullscreen = 1.3,
     grow_window = true,
