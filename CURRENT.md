@@ -72,7 +72,7 @@
 - 一次全关联：`C:\app\mpv\installer\mpv-install.bat` 右键“以管理员身份运行”，它会把所有常见视频格式注册给这个 mpv（装完后在“设置 → 应用 → 默认应用”里把视频播放器选 mpv）。
 
 ## 对外下载包（2026-11-19）
-- 给作品集网站做了英文下载包 `mpv-frame-edition-win64.zip`：干净的 zhongfly 官方构建（mpv v0.42.0-169-gb7339522c，2026-11-19）+ 本仓库配置（注释英文化、去掉本机专属说明）+ 英文 README + LICENSES（mpv GPL-2.0+、uosc LGPL-2.1、thumbfast MPL-2.0、本仓库 MIT）。交付在 `C:\AgentCore	ools\Workbench\portfolio_site\deliver\`，细节见那里的 DELIVERY.md。仓库加了 LICENSE（MIT，用户定的）。
+- 给作品集网站做了英文下载包 `mpv-frame-edition-win64.zip`：干净的 zhongfly 官方构建（mpv v0.42.0-169-gb7339522c，2026-11-19）+ 本仓库配置（注释英文化、去掉本机专属说明）+ 英文 README + LICENSES（mpv GPL-2.0+、uosc LGPL-2.1、thumbfast MPL-2.0、本仓库 MIT）。交付在 `C:\AgentCore\tools\Workbench\portfolio_site\deliver\2\`，细节见那里的 DELIVERY.md。仓库加了 LICENSE（MIT，用户定的）。
 
 ## 没验证 / 还悬着
 - 笔记本（RTX 3060 / Win11）上没跑过，数字待测；NVIDIA 的 D3D11 建设备时间可能和 AMD 不同。

@@ -24,6 +24,7 @@ local opts = {
     fine_px_per_frame = 6,   -- 放大镜模式每帧占几像素（决定一屏几秒：30 帧视频在 1280 宽窗口约 6 秒，全屏约 14 秒）
     fine_span = 15,          -- 放大镜模式一屏最多几秒
     font = "Segoe UI",
+    lang = "zh",             -- 界面文字：zh 中文 / en 英文（帧号标签、Tab 切换提示）
 }
 require("mp.options").read_options(opts, "filmstrip")
 
@@ -417,7 +418,9 @@ local function draw()
         if fine then
             str = fmt_time(pos)
             local fr = mp.get_property_native("estimated-frame-number")
-            if fr then str = str .. "  ·  第 " .. fr .. " 帧" end
+            if fr then
+                str = str .. (opts.lang == "en" and ("  ·  frame " .. fr) or ("  ·  第 " .. fr .. " 帧"))
+            end
         else
             str = fmt_time(pos) .. "  /  " .. fmt_time(dur)
         end
@@ -778,7 +781,11 @@ end
 mp.add_key_binding(nil, "toggle", function()
     set_enabled(not enabled)
     save_mode()
-    mp.osd_message(enabled and "B：胶片条" or "A：uosc 进度条", 1)
+    if opts.lang == "en" then
+        mp.osd_message(enabled and "B: filmstrip" or "A: classic bar", 1)
+    else
+        mp.osd_message(enabled and "B：胶片条" or "A：uosc 进度条", 1)
+    end
 end)
 
 ----------------------------------------------------------------------
